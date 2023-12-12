@@ -19,36 +19,55 @@
 from ij import IJ # standard
 
 # stuff for the overlays
-from ij.gui import Overlay, TextRoi, Roi, OvalRoi, Line, PolygonRoi
+from ij.gui import Overlay, TextRoi, Roi, GenericDialog
 from java.awt import Font, Color
 
 #stuff for saving
 from ij.io import FileSaver
 import os
 
-### //// ####
-## USER VARIABLES
-### //// ####
-start_slice = 16
-end_slice = 23
-skip_size = 1
-sample_id = 'i1197-L'
-crop = False
+active_image = IJ.getImage()
 
+# some stuff to auto set directory
+file_path = active_image.getOriginalFileInfo().filePath if active_image.getOriginalFileInfo() else None
+existing_directory = os.path.dirname(file_path) if file_path else None
+
+# Display a dialog to get user input
+gd = GenericDialog("User Input")
+gd.addStringField("Sample ID:", "i1198-L")
+gd.addNumericField("Start Slice:", 17, 0)
+gd.addNumericField("End Slice:", 24, 0)
+gd.addNumericField("Skip Size:", 1, 0)
+gd.addCheckbox("Image Cropped?:", False)
+gd.addNumericField("Downsampling Scale:", 0.1, 2)
+gd.addNumericField("Offset:", 0.1, 2)
+gd.addStringField("Save Directory:", existing_directory)
+gd.showDialog()
+
+# Check if the user clicked OK
+if not gd.wasOKed():
+    print("User canceled the operation")
+    exit()
+
+# Assign user input to variables
+start_slice = int(gd.getNextNumber())
+end_slice = int(gd.getNextNumber())
+skip_size = int(gd.getNextNumber())
+sample_id = gd.getNextString()
+crop = gd.getNextBoolean()
+downsampling_scale = gd.getNextNumber()
+offset = gd.getNextNumber()
+directory = gd.getNextString()
+
+# WIP
+annotation_text_size = int(400 * downsampling_scale) #we'll try it!
 num_slices = (end_slice - start_slice + 1)/skip_size
 
-## some additional variables
-downsampling_scale = .1
-offset = .1
-## when ds_s = .1, ts = 80
-annotation_text_size = int(400 * downsampling_scale) #we'll try it!
-
 ## parsing our file info to name things later
-originalName = IJ.getImage().getTitle() # Get the title of the currently open window
-directory = IJ.getDirectory("image") # Get the directory of the file
+originalName = active_image.getTitle() # Get the title of the currently open window
 
 if crop:
-    originalNameWithoutExt = "crop_{}".format(originalName.split(" ")[0]) # Extract the filename without extension
+    originalNameWithoutExt = "crop_{}".format(originalName.split(" ")[0]) # Extract the filename without extension by first space
 else:  
     originalNameWithoutExt = originalName.split(" ")[0] # Extract the filename without extension
 
