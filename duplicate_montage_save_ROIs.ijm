@@ -6,8 +6,12 @@
 originalName = getTitle(); //gets the title of your currently open window so we can come back to it
 directory = getDirectory(originalName);  // specify the place where we will save all of the .pngs we're about to make
 
+tiff_folder = directory + File.separator + "/tiffs";
+png_folder = directory + File.separator + "/pngs";
+
+
 // ** save the stuff so when i fuck up i can go back **//
-date = "231204"
+date = 
 roiManager("Save", directory + date + "_RoiSet.zip");
 
 Stack.setDisplayMode("grayscale");  //grayscale is best scale for the montage
@@ -24,12 +28,12 @@ pixel_adjust = 3 // variable to scale up the image afterwards in case it's too t
 col_offset = 0.03; // might need to vary but so far fine
 
 // ** info about the channels ** //
-ch1 = "HA"
-ch2 = "AU5";
+ch1 = "S1"
+ch2 = "HA";
 ch3 = "SPOT";
-ch4 = "ALFA";
+ch4 = "AU5";
 ch5 = "NWS";
-ch6 = "S1";
+ch6 = "ALFA";
 ch7 = "HSV (r1)";
 
 setFont("SansSerif", annotation_font_size, " antialiased");
@@ -43,14 +47,20 @@ for (i = 1; i < roiManager('count'); i++) {
 	selectWindow(originalName);
     roiManager('select', i); //select the next roi
     Stack.getPosition(channel, slice, frame);
-    //make litte image
+   	name = getTitle(); //just a placeholder for later because I don't understand Fiji window management
+   	
+    //make little image
     run("Duplicate...", "duplicate channels=1-"+n_chans+" slices="+slice);
     
     //resize to have enough pixels to write on
     run("Size...", "width="+getWidth()*pixel_adjust+" depth="+n_chans+" constrain average interpolation=None"); //make it bigger for the pixel stuff later
     
+    //save the tiff
+    save_as_tiff = tiff_folder+"/ROI-"+i+"_Zpos-"+slice+"_"+name; //make name to save it
+	saveAs("tif", save_as_tiff); //actually save it
+    
     // make the montage
-    name = getTitle(); //just a placeholder for later because I don't understand Fiji window management
+
 	run("Make Montage...", "columns="+montage_cols+" rows="+montage_rows+" scale="+downsampling_scale+" border=6 use"); 
 	
 	//this is some stuff to automatically label in the same place in the panels, regardless of how wide the ROI is
@@ -79,10 +89,12 @@ for (i = 1; i < roiManager('count'); i++) {
 	
 	Overlay.show(); // show it
 	print(name);
-	save_as = directory+"ROI-"+i+"_Zpos-"+slice+"_"+name; //make name to save it
-	saveAs("PNG", save_as); //actually save it
+	save_as_png = png_folder+"/ROI-"+i+"_Zpos-"+slice+"_"+name; //make name to save it
+	saveAs("PNG", save_as_png); //actually save it
+
 	close(); //close the png
 	//close(name); //close the tiff file we made along the way
+	
 //back to the beginning
 };
 
@@ -93,8 +105,6 @@ print("Done saving thumbnails");
 selectWindow(originalName);
 run("Z Project...", "projection=[Max Intensity]");
 run("Make Montage...", "columns="+montage_cols+" rows="+montage_rows+" scale=.5 border = 40 use");
-
-run("BIOP Channel Tools");
 
 single_img_width = getWidth()/montage_cols;  // get the width of one column
 single_img_height = getHeight()/montage_rows; // get the height of one row
@@ -111,7 +121,7 @@ y_4 = 3*single_img_width + y_1;
 y_5 = 4*single_img_width + y_1;
 y_6 = 5*single_img_width + y_1;
 y_7 = 6*single_img_width + y_1;
-//
+
 Overlay.drawString(ch1, y_1, x_1, 0.0);
 Overlay.drawString(ch2, y_2, x_1, 0.0);
 Overlay.drawString(ch3, y_3, x_1, 0.0);
@@ -119,17 +129,17 @@ Overlay.drawString(ch4, y_4, x_1, 0.0);
 Overlay.drawString(ch5, y_5, x_1, 0.0);
 Overlay.drawString(ch6, y_6, x_1, 0.0);
 Overlay.drawString(ch7, y_7, x_1, 0.0);
-//	
 Overlay.show(); // show it
-//
+
 save_as = directory+"grayscale-montage_"+name; //make name to save it
 saveAs("PNG", save_as); //actually save it
-//
+//close();
+
 //NOW make the colorful overlay image
 // colors are gonna be set here for a minute because they shouldn't be touched really
 selectWindow(originalName);
 colorArray = newArray("Red", "Green", "Blue", "Grays", "Cyan", "Magenta", "Yellow");
-//
+
 //// Loop through channels and colors
 for (i = 0; i < n_chans; i++) {
     channel = i + 1; // Channels start from 1
@@ -146,5 +156,4 @@ print(save_as)
 saveAs("PNG", save_as); //actually save it
 print("Done saving overlay image");
 //
-//
-//
+
