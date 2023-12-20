@@ -26,22 +26,36 @@ from java.awt import Font, Color
 from ij.io import FileSaver
 import os
 
-active_image = IJ.getImage()
+active_image = IJ.getImage() #handle for referring to image
+originalName = active_image.getTitle() # Get the title of the currently open window
+
 
 # some stuff to auto set directory
 file_path = active_image.getOriginalFileInfo().filePath if active_image.getOriginalFileInfo() else None
 existing_directory = os.path.dirname(file_path) if file_path else None
 
+## ok how hard to pull info from file_name???
+sample_name = originalName.split("_")[1] if originalName.split("_")[1] else None
+start_slice = int(originalName.split("_")[2].split("-")[0][1:]) if originalName.split("_")[1].split("-")[0] else None
+end_slice = int(originalName.split("_")[2].split("-")[1][1:]) if originalName.split("_")[1].split("-")[0] else None
+
+print("the extracted info was name: {}, start slice: {}".format(sample_name, start_slice))
+
+
+
+
 # Display a dialog to get user input
 gd = GenericDialog("User Input")
-gd.addStringField("Sample ID:", "i1198-L")
-gd.addNumericField("Start Slice:", 17, 0)
-gd.addNumericField("End Slice:", 24, 0)
+gd.addStringField("Sample ID:", sample_name)
+gd.addNumericField("Start Slice:", start_slice, 0)
+gd.addNumericField("End Slice:", end_slice, 0)
 gd.addNumericField("Skip Size:", 1, 0)
 gd.addCheckbox("Image Cropped?:", False)
 gd.addNumericField("Downsampling Scale:", 0.1, 2)
 gd.addNumericField("Offset:", 0.1, 2)
 gd.addStringField("Save Directory:", existing_directory)
+
+
 gd.showDialog()
 
 # Check if the user clicked OK
@@ -62,9 +76,9 @@ directory = gd.getNextString()
 # WIP
 annotation_text_size = int(400 * downsampling_scale) #we'll try it!
 num_slices = (end_slice - start_slice + 1)/skip_size
+print (num_slices)
 
 ## parsing our file info to name things later
-originalName = active_image.getTitle() # Get the title of the currently open window
 
 if crop:
     originalNameWithoutExt = "crop_{}".format(originalName.split(" ")[0]) # Extract the filename without extension by first space
@@ -78,7 +92,7 @@ def define_montage(num_slices,
                    downsampling_scale = downsampling_scale,
                    scale_bar_text = 150,
                    annotation_text_size = annotation_text_size):
-    if num_slices < 12:
+    if num_slices <= 11:
         montage_col = 2
         montage_row = num_slices/2
     else:
@@ -88,7 +102,7 @@ def define_montage(num_slices,
                                                                                             montage_col,
                                                                                             montage_row,
                                                                                             downsampling_scale))
-    return montage_col, montage_row, downsampling_scale, scale_bar_text, annotation_text_size, num_slices
+    return montage_col, montage_row, downsampling_scale, scale_bar_text, annotation_text_size
 
 def define_widths(montage_file, montage_col, montage_row, offset=offset):
     # get the deets
@@ -104,8 +118,7 @@ def define_widths(montage_file, montage_col, montage_row, offset=offset):
 
     return single_img_height, single_img_width, row_offset, col_offset
 
-# god why.
-montage_col, montage_row, downsampling_scale, scale_bar_text, annotation_text_size, num_slices = define_montage(8)
+montage_col, montage_row, downsampling_scale, scale_bar_text, annotation_text_size = define_montage(num_slices)
 print("Making montage..." )
 IJ.run("Make Montage...", 
        "columns=" + str(montage_col) + 
@@ -145,7 +158,7 @@ def add_overlays(imp, overlay, channels, coordinates, annotation_text_size):
         roi.setFillColor(Color(0,0,0,0.5))  
         overlay.add(roi)
         imp.setRoi(roi)
-    
+            
     #imp.overlay.add(roi)
     imp.setOverlay(overlay)
     imp.show()
@@ -174,12 +187,18 @@ print("\nSaving easily readable files...")
 ## result_loc = os.path.join(directory, originalNameWithoutExt + "_annotated")
 
 # # Save as PNG
-save_as_png = os.path.join(os.path.join(directory, originalNameWithoutExt + "_annotated.png"))
+print("\nSaving files in directory: {}".format(directory))
+if crop:
+    save_as_png = os.path.join(os.path.join(directory, originalNameWithoutExt + "_crop_annotated.png"))
+    save_as_jpg = os.path.join(os.path.join(directory, originalNameWithoutExt + "_crop_annotated.jpg"))
+else:
+    save_as_png = os.path.join(os.path.join(directory, originalNameWithoutExt + "_annotated.png"))
+    save_as_jpg = os.path.join(os.path.join(directory, originalNameWithoutExt + "_annotated.jpg"))
+
 FileSaver(IJ.getImage()).saveAsPng(save_as_png)
 print("Saved PNG....")
 
 # # Save as JPEG
-save_as_jpg = os.path.join(os.path.join(directory, originalNameWithoutExt + "_annotated.jpg"))
 FileSaver(IJ.getImage()).saveAsJpeg(save_as_jpg)
 print("Saved jpg. Done!")
 
