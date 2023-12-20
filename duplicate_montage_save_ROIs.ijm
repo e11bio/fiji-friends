@@ -11,7 +11,7 @@ png_folder = directory + File.separator + "/pngs";
 
 
 // ** save the stuff so when i fuck up i can go back **//
-date = 
+date = "231218"
 roiManager("Save", directory + date + "_RoiSet.zip");
 
 Stack.setDisplayMode("grayscale");  //grayscale is best scale for the montage
@@ -20,7 +20,7 @@ Stack.setDisplayMode("grayscale");  //grayscale is best scale for the montage
 
 n_chans = 6; //variable to set the number of channels we're working with. e.g. if you only want the first five (and the 6th is a null imaging channel because of the dual acquisition), set this to 5
 
-downsampling_scale = 1;  //tweak this as needed. for res level three, i'd advice no downsampling at all
+downsampling_scale = 0.8;  //tweak this as needed. for res level three, i'd advice no downsampling at all
 annotation_font_size = 15; //tweak as needed -- try running this on a single ROI first. The font doesn't auto set yet.
 montage_rows = 1;
 montage_cols = n_chans/montage_rows; //
@@ -28,12 +28,12 @@ pixel_adjust = 3 // variable to scale up the image afterwards in case it's too t
 col_offset = 0.03; // might need to vary but so far fine
 
 // ** info about the channels ** //
-ch1 = "S1"
-ch2 = "HA";
+ch1 = "PRTC"
+ch2 = "E2";
 ch3 = "SPOT";
-ch4 = "AU5";
-ch5 = "NWS";
-ch6 = "ALFA";
+ch4 = "ALFA";
+ch5 = "HA";
+ch6 = "AU5";
 ch7 = "HSV (r1)";
 
 setFont("SansSerif", annotation_font_size, " antialiased");
@@ -41,7 +41,6 @@ setColor("white");
 
 run("Colors...", "foreground=white");
 
-n_chans = 6; //variable to set the number of channels we're working with. e.g. if you only want the first five (and the 6th is a null imaging channel because of the dual acquisition), set this to 5
 for (i = 1; i < roiManager('count'); i++) {
 	// get the ROI info
 	selectWindow(originalName);
