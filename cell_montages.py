@@ -44,20 +44,39 @@ def showParametersDialog(image):
     """
     gd = GenericDialog("Specify Image Information") #name the window
 
+    gd.setInsets(40, 0, 0)
+
     imgName = image.getTitle() # Get the title of the currently open window
 
     default_date = datetime.now().strftime("%y%m%d") 
-    default_roi_set_filename = "RoiSet.zip"
+
+    filename_parts = imgName.split("_")
+    ## this section is for files with thef orm ID-ixxx
+    exp_id = extract_string_with_prefix(imgName, prefix="ID")
+    default_sample_id = "{}".format(exp_id)
+    default_roi_set_filename = "RoiSet_{}.zip".format(default_sample_id)
+
+    ## for jules formatted data
+    # default_sample_id = "{}-{}".format(filename_parts[2], filename_parts[3])
+    default_frame = "{}".format((filename_parts[len(filename_parts)-1][1:3]))
+    # default_image_identifier = "ID-{}_FOV-{}".format(default_sample_id, default_frame)
+    # default_roi_set_filename = "RoiSet_{}.zip".format(default_image_identifier)
 
     default_n_chans = image.getNChannels() if image else 6
 
+
+
     # Add input fields to the dialog
     gd.addStringField("Date (YYMMDD):", default_date)
+    gd.addStringField("Sample ID (iXXXX-sNN):", default_sample_id)
+    gd.addStringField("FOV:", default_frame)
+
+
     gd.addStringField("ROI Set Filename:", default_roi_set_filename)
 
     gd.addNumericField("Number of Channels:", default_n_chans, 0)
     gd.addNumericField("Downsampling Scale (when montaging):", 0.8, 2)
-    gd.addNumericField("Annotation size\n(as fraction of image)", 10, 0)
+    gd.addNumericField("Annotation size\n(as fraction of image)", 15, 0)
     gd.addNumericField("Montage Rows:", 1, 0)
     gd.addNumericField("Pixel Adjustment (not used):", 3, 0)
     gd.addNumericField("Column Offset: (not used", 0.03, 2)
@@ -71,6 +90,9 @@ def showParametersDialog(image):
 
     # Retrieve values from the dialog
     date = gd.getNextString()
+    sample_id = gd.getNextString()
+    fov = gd.getNextString()
+
     roi_set_filename = gd.getNextString()
 
     n_chans = int(gd.getNextNumber())
@@ -79,10 +101,24 @@ def showParametersDialog(image):
     montage_rows = int(gd.getNextNumber())
     pixel_adjust = int(gd.getNextNumber())
     col_offset = gd.getNextNumber()
+    
+    image_identifier = "ID-{}_FOV-{}".format(sample_id, fov)
+    print("roi name was parsed as: {}".format(roi_set_filename))
 
-    return date, roi_set_filename, n_chans, downsampling_scale, annotation_font_size, montage_rows, pixel_adjust, col_offset
+    return date, image_identifier, roi_set_filename, n_chans, downsampling_scale, annotation_font_size, montage_rows, pixel_adjust, col_offset
 
-def getChannelNamesForm(image, n_chans):
+def extract_string_with_prefix(input_string, prefix="ch"):
+    # Split the input string by the character "_"
+    parts = input_string.split("_")
+    # Loop through the parts to find the one that starts with the specified prefix
+    for part in parts:
+        if part.startswith(prefix):
+            return part
+    
+    # If no string starting with the specified prefix is found, return None
+    return None
+
+def getChannelNamesForm(image, n_chans, start_pos_chans=6):
     """
     Displays a dialog window for specifying channel names based on the image filename.
 
@@ -91,17 +127,24 @@ def getChannelNamesForm(image, n_chans):
     - n_chans (int): The number of channels.
 
     Returns:
-    list or None: A list containing the specified channel names. Returns None if the dialog is canceled.
+    list or None: A list containing the specified channel names. Returns None if the dialog is canceled or if the filename doesn't parse correctly.
     """
     gd = GenericDialog("Specify Channel Names")
+    gd.setInsets(40, 0, 0)
 
-    name = image.getTitle() # Get the title of the currently open window
+    name = image.getTitle()  # Get the title of the currently open window
 
     # Extract default channel names from the filename
-    filename_parts = name.split("_")
-    default_channel_names = filename_parts[6:6+n_chans]
+    filename_parts = extract_string_with_prefix(name)
+    try:
+        filename_parts = filename_parts.split("-")
+        default_channel_names = filename_parts[1:n_chans+1]
+    except:
+    	default_channel_names = ""
 
-    for i, default_value in enumerate(default_channel_names, start=1):
+
+    for i in range(1, n_chans+1): 
+        default_value = default_channel_names[i-1] if i <= len(default_channel_names) else ""
         gd.addStringField("Channel {}:".format(i), default_value)
 
     gd.showDialog()
@@ -110,8 +153,9 @@ def getChannelNamesForm(image, n_chans):
         return None
 
     # Retrieve channel names from the form
-    channel_names = [gd.getNextString() for _ in range(len(default_channel_names))]
+    channel_names = [gd.getNextString() for _ in range(n_chans)]
     return channel_names
+
 
 def createOutputFolders(directory):
     """
@@ -183,15 +227,15 @@ def define_widths(montage_file, montage_col, montage_row, offset,  annotation_fo
 
 
 
-    print(("The entire montage is {}x{} pixels."
-            "\nEach frame is {}x{}."
-            "\n The column offset from the edge is is {},"
-             "and the offset from the bottom is {}.").format(montage_width, 
-                                                    montage_height,
-                                                    single_img_width,
-                                                    single_img_height, 
-                                                    col_offset, 
-                                                    row_offset))
+    # print(("The entire montage is {}x{} pixels."
+    #         "\nEach frame is {}x{}."
+    #         "\n The column offset from the edge is is {},"
+    #          "and the offset from the bottom is {}.").format(montage_width, 
+    #                                                 montage_height,
+    #                                                 single_img_width,
+    #                                                 single_img_height, 
+    #                                                 col_offset, 
+    #                                                 row_offset))
 
     return single_img_height, single_img_width, row_offset, col_offset, font_size
 
@@ -263,8 +307,7 @@ def add_overlays(imp, overlay, channels, coordinates, annotation_font_size):
     # Show the ImagePlus with annotations
     imp.show()
 
-
-def processROIs(image, 
+def processROIs(image, sample_id,
                 roi_manager, 
                 n_chans, 
                 tiff_folder, 
@@ -292,25 +335,34 @@ def processROIs(image,
     """
     name = image.getTitle()  # Placeholder for later use
 
-    default_n_chans = image.getNChannels() if image else 6
+    default_n_chans = image.getNChannels() if image else 4
 
     for i in range(0, roi_manager.getCount()):
+    # for i in range(41, 45):
+
         # Get the ROI info
         IJ.selectWindow(name)
         imp = IJ.getImage()  # Assuming the image is the active image
+        #print("image is: {}.\n ROI is {}".format(imp, i))
 
         roi_manager.select(i)  # Select the next ROI
         channel = imp.getC()
         current_slice = imp.getZ()
+        #print("slice of ROI is: {}".format(current_slice))
 
         # set the slice range
         start_slice = max(1, current_slice - slice_range)
         end_slice = min(imp.getNSlices(), current_slice + slice_range)
-
-        # # Make a duplicate image
+        #print("start slice is {} and end slice is {}".format(start_slice, end_slice))
+        roi_id = "ROI-{}".format(i)
+        z_pos_id = "Zpos-{}".format(current_slice)
+        
+                # # Make a duplicate image
         IJ.run("Duplicate...", "duplicate channels=1-" + str(n_chans) + " slices=" + str(start_slice) + "-" + str(end_slice))
+        #print("duplicated with code: \n"
+          #    "Duplicate...", "duplicate channels=1-" + str(n_chans) + " slices=" + str(start_slice) + "-" + str(end_slice))
         # # save the z stepped as a tiff to return back to this easily
-        save_as_tiff = "{}/ROI-{}_Zpos-{}_{}".format(tiff_folder, i, current_slice, name)
+        save_as_tiff = "{}/{}_{}_{}_{}".format(tiff_folder, sample_id, roi_id, z_pos_id, name)        
         IJ.saveAs("Tiff", save_as_tiff)
         print("Saved{}".format(save_as_tiff))
         
@@ -318,8 +370,11 @@ def processROIs(image,
         # trim to get only the middle slice
         centerSlice = imp.getNSlices()
         cSlicefmt = str(int(centerSlice/2+1))
+        #print("image is: {}".format(imp))
+        #print("Making stack using only center slice: {}".format(cSlicefmt),)
 
-        IJ.run(imp, "Make Substack...", "channels=1-6 slices={}".format(cSlicefmt))
+        IJ.run(imp, "Make Substack...", "channels=1-{} slices={}".format(str(n_chans), cSlicefmt))
+        
         # # # Resize to have enough pixels to write on
         IJ.run("Size...", "width=" + str(imp.getWidth() * pixel_adjust) + " depth=" + str(n_chans) + " constrain average interpolation=None")
         
@@ -334,9 +389,12 @@ def processROIs(image,
 
         add_overlays(montage, overlay, channels, coordinates, font_size)
         
-        save_as_png = "{}/ROI-{}_Zpos-{}_{}.png".format(png_folder, i, current_slice, name)
+        save_as_png = "{}/{}_{}_{}_{}.png".format(png_folder, sample_id, roi_id, z_pos_id, name)        
         FileSaver(montage).saveAsPng(save_as_png)
         print("Saved{}".format(save_as_png))
+        imp.close()
+        montage.close()
+    print("completed all rois!")
         
 
 # Show the parameters dialog
@@ -345,7 +403,7 @@ parameters = showParametersDialog(active_image)
 
 # assign params to variables and do the channel name assignment. breaks if channels are empty
 if parameters is not None:
-    date, roi_set_filename, n_chans, downsampling_scale, annotation_font_size, montage_rows, pixel_adjust, col_offset = parameters
+    date, sample_id, roi_set_filename, n_chans, downsampling_scale, annotation_font_size, montage_rows, pixel_adjust, col_offset = parameters
     montage_cols = n_chans/montage_rows
    # assign channel params
     channels = getChannelNamesForm(active_image, n_chans)
@@ -383,6 +441,6 @@ if parameters is not None:
 
 ## now we have made the paramters. hooray.
 
-processROIs(active_image, roi_manager, n_chans, tiff_folder,
+processROIs(active_image,sample_id, roi_manager, n_chans, tiff_folder,
             montage_cols, montage_rows, downsampling_scale, 
-            pixel_adjust, annotation_font_size, 3)
+            pixel_adjust, annotation_font_size, 4)
