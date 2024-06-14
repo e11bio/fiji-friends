@@ -19,7 +19,6 @@
 from ij import IJ # standard
 import re
 
-
 # stuff for the overlays
 from ij.gui import Overlay, TextRoi, Roi, GenericDialog
 from java.awt import Font, Color

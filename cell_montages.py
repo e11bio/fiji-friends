@@ -59,11 +59,11 @@ def showParametersDialog(image):
     ## for jules formatted data
     # default_sample_id = "{}-{}".format(filename_parts[2], filename_parts[3])
     default_frame = "{}".format((filename_parts[len(filename_parts)-1][1:3]))
+    default_sample_id = "{}-{}".format(filename_parts[2], filename_parts[3])
     # default_image_identifier = "ID-{}_FOV-{}".format(default_sample_id, default_frame)
     # default_roi_set_filename = "RoiSet_{}.zip".format(default_image_identifier)
 
     default_n_chans = image.getNChannels() if image else 6
-
 
 
     # Add input fields to the dialog
@@ -137,7 +137,7 @@ def getChannelNamesForm(image, n_chans, start_pos_chans=6):
     # Extract default channel names from the filename
     filename_parts = extract_string_with_prefix(name)
     try:
-        filename_parts = filename_parts.split("-")
+        filename_parts = filename_parts.split("_")
         default_channel_names = filename_parts[1:n_chans+1]
     except:
     	default_channel_names = ""
@@ -338,7 +338,7 @@ def processROIs(image, sample_id,
     default_n_chans = image.getNChannels() if image else 4
 
     for i in range(0, roi_manager.getCount()):
-    # for i in range(41, 45):
+    #for i in range(24, 29):
 
         # Get the ROI info
         IJ.selectWindow(name)
