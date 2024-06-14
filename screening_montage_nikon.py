@@ -10,13 +10,15 @@
 # This is a re-implementation of a previous fiji language script to montage a set of images with annotations on the slice information.
 # It will have a third, and hopefully final, implementation in Napari.
 # In the meantime.
-# This takes as input an open file with b&c already set. If composite, the montage will be a composite; if single channel, then the montage will be single channel.
-# Channels should be in sequential order. 
+# We assume we have opened a file with channels and different positions (Fiji reads these as z stacks or as timepoints. It doesn't matter.)
+# B&C# Channels should be in sequential order. 
 # The user inputs some information about the sample (slices, sample ID, # slices between slices) and output (downsampling, text sizes)
 # The script takes the file, creates a montage, automatically places text ROIs with slice information, and saves it back as .JPG to the original image folder.
 
 
 from ij import IJ # standard
+import re
+
 
 # stuff for the overlays
 from ij.gui import Overlay, TextRoi, Roi, GenericDialog
@@ -34,12 +36,84 @@ originalName = active_image.getTitle() # Get the title of the currently open win
 file_path = active_image.getOriginalFileInfo().filePath if active_image.getOriginalFileInfo() else None
 existing_directory = os.path.dirname(file_path) if file_path else None
 
-## ok how hard to pull info from file_name???
-sample_name = originalName.split("_")[1] if originalName.split("_")[1] else None
-start_slice = int(originalName.split("_")[2].split("-")[0][1:]) if originalName.split("_")[1].split("-")[0] else None
-end_slice = int(originalName.split("_")[2].split("-")[1][1:]) if originalName.split("_")[1].split("-")[0] else None
+## HERE WE GO
+def remove_non_numeric(string):
+    return ''.join(c for c in string if c.isdigit() or c == '.')
 
-print("the extracted info was name: {}, start slice: {}".format(sample_name, start_slice))
+def extract_variables_from_filename(filename, existing_directory=None):
+    # Remove file extension if present
+    filename, _ = os.path.splitext(filename)
+
+    pairs = {}
+
+    # Split the filename by "_"
+    elements = filename.split("_")
+
+    # Iterate through elements and split each by "-"
+    for element in elements:
+        key_value = element.split("-", 1)
+        if len(key_value) == 2:
+            key, value = key_value
+            pairs[key] = value
+
+    # Extract specific variables based on conditions
+    sample_id = None
+    try:
+        sample_id = pairs.get('ID')
+        if sample_id:
+            sample_id = sample_id # Extract numeric part and convert to int
+    except (ValueError, TypeError):
+        print("Error: Unable to extract valid sample ID.")
+
+    slice_values = pairs.get('slice')
+    start_slice, end_slice = None, None
+    
+    if slice_values:
+        slices = slice_values.split('-')
+        start_slice_str = remove_non_numeric(slices[0])
+        end_slice_str = remove_non_numeric(slices[1]) if len(slices) > 1 else None
+
+        # Convert to float
+        try:
+            start_slice = float(start_slice_str)
+            end_slice = float(end_slice_str) if end_slice_str else None
+        except (ValueError, TypeError):
+            print("Error: Unable to convert start or end slice to float.")
+
+    # Save the key-value pairs to a JSON file in the specified directory
+    if existing_directory:
+        output_json_file = os.path.join(existing_directory, "output_file.json")
+        with open(output_json_file, 'w') as json_file:
+            json.dump(pairs, json_file, indent=2)
+    
+    return sample_id, start_slice, end_slice, pairs
+
+
+# Example usage
+# filename = "240105_ID-i1214_slice-s13-s24_obj-4x_chs-BF-GFP-tdTomato004"
+# sample_name, start_slice, end_slice, pairs = extract_variables_from_filename(filename)
+
+# actual usage
+sample_name, start_slice, end_slice, pairs = extract_variables_from_filename(originalName)
+sample_id = sample_name
+print("Sample ID:", sample_id)
+print("Start Slice:", start_slice)
+print("End Slice:", end_slice)
+print("Pairs:", pairs)
+
+# Display a dialog to get user input
+gd = GenericDialog("User Input")
+gd.addStringField("Sample ID:", sample_id)
+gd.addNumericField("Start Slice:", start_slice, 0)
+gd.addNumericField("End Slice:", end_slice, 0)
+gd.addNumericField("Skip Size:", 1, 0)
+gd.addCheckbox("Image Cropped?:", False)
+gd.addNumericField("Downsampling Scale:", 0.1, 2)
+gd.addNumericField("Offset:", 0.1, 2)
+gd.addStringField("Save Directory:", existing_directory)
+
+
+gd.showDialog()
 
 
 
@@ -73,10 +147,9 @@ downsampling_scale = gd.getNextNumber()
 offset = gd.getNextNumber()
 directory = gd.getNextString()
 
-# WIP
+# WIP stuff but basically runs ok
 annotation_text_size = int(400 * downsampling_scale) #we'll try it!
 num_slices = (end_slice - start_slice + 1)/skip_size
-print (num_slices)
 
 ## parsing our file info to name things later
 
