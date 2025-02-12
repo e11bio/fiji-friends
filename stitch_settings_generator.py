@@ -1,26 +1,56 @@
 """
-This just generates a big stitcher settings file from stitch-dataset.xml files that makes it much easier to view. Run with the filepath of the folder that contains all the "round[x]" subfolders. If this is not how the data is structured feel free to change __main__. 
+This script reads a BigStitcher/SpimData XML file,
+selects one active channel per tile (6 channels per tile) according to a channel offset,
+and generates a BDV settings.xml file that exactly matches the expected structure.
 
-Requirements:
-pip install pydantic 
-pip install pydantic-bistitcher
-pip install xmltodict
+When you copy it in and load the file, it might give you a java error — you can feel free to ignore that it doesn't really matter. Channels are starting at 0 (so 0-5, not 1-6).
 
+In the working XML:
+  - In <ViewerState>/<Sources> there are 72 Source entries,
+    with the active flag set to true only for channel IDs
+    0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, and 66 (if offset=0).
+  - The <SetupAssignments>/<ConverterSetups> section has 72 entries.
+    For each tile of 6 channels:
+      - The channel with (raw index – offset mod 6)==0 is "active" and gets:
+          • if tile is even: min=100.0, max=125.0, color=-65281, groupId=0
+          • if tile is odd:  min=100.0, max=150.0, color=16777215, groupId=1
+      - All other channels get min=90.0, max=130.0, color=16777215, and groupId equal to their adjusted index (1–5).
+  - The <SourceGroups> section groups the active channels:
+      • In even tiles (tile%6==0) the active channel’s ID goes into group “green”
+      • In odd tiles the active channel’s ID goes into group “magenta”
+  - The <MinMaxGroups> section is generated with 6 groups:
+      • Group 0: currentMin=0.0/currentMax=65535.0
+      • Groups 1–5: currentMin=90.0/currentMax=130.0
+  - <ManualSourceTransforms> always outputs exactly 4 transforms.
+  
+Optionally, a channel offset (an integer between 0 and 5) may be provided.
+If not provided, it defaults to 0.
+  
+Dependencies:
+    pip install pydantic-bigstitcher xmltodict
 """
 
-# from pydantic import BaseModel
-from typing import List
-import xmltodict
-from pydantic_bigstitcher import SpimData
-from collections import defaultdict
 import sys
-import os 
-# Define the Pydantic models
+import os
+import xmltodict
+from math import floor
+from pydantic_bigstitcher import SpimData
+import argparse
+from xml.dom.minidom import parseString
 
-# file = "/shared/s3/e11-hpc/compute/RP022_i1264_cpd/gel1/fov1/round1/stitch-dataset.xml"
+# Colors and calibration values (as strings)
+GREEN_COLOR = "65281"   # active channel in even tiles (green)
+MAGENTA_COLOR = "16596405"  # active channel in odd tiles (magenta)
+DEFAULT_MIN_ACTIVE_EVEN = "100.0"
+DEFAULT_MAX_ACTIVE_EVEN = "125.0"
+DEFAULT_MIN_ACTIVE_ODD  = "100.0"
+DEFAULT_MAX_ACTIVE_ODD  = "150.0"
+DEFAULT_MIN_NONACTIVE   = "90.0"
+DEFAULT_MAX_NONACTIVE   = "130.0"
 
-MAGENTA = 16777215
-GREEN = 65332
+def text_elem(val):
+    """Wrap a value as a text element for xmltodict."""
+    return {"#text": str(val)}
 
 def load_spimdata(xml_filename: str) -> SpimData:
     """Load the BigStitcher XML file into a SpimData object."""
@@ -29,169 +59,215 @@ def load_spimdata(xml_filename: str) -> SpimData:
     spim_data = SpimData.from_xml(xml_content)
     return spim_data
 
-def choose_active_sources(view_setups: list) -> dict:
+def build_viewer_sources(view_setups, offset: int):
     """
-    Group view setups by tile and mark only the first one in each group as active.
-    
-    Returns a dictionary mapping view setup id (as string) to a boolean indicating
-    whether that source should be active.
+    Build a list of Source dictionaries for the <ViewerState>/<Sources> section.
+    Each view setup gets a <Source> with <active> set to "true" only if its adjusted index is 0.
+    The adjusted index is defined as (raw_index - offset) mod 6.
     """
-    # Group by tile (tile value is stored in view_setup.attributes.tile)
-    groups = defaultdict(list)
-    for vs in view_setups:
-        tile = vs.attributes.tile  # note: these are strings in your XML
-        groups[tile].append(vs)
-    
-    active_map = {}
-    # For each group, sort by id (if needed) and mark the first as active.
-    for tile, group in groups.items():
-        # sort group by id (if not already in order)
-        group_sorted = sorted(group, key=lambda vs: int(vs.ident))
-        # Mark the first as active; others as inactive.
-        for idx, vs in enumerate(group_sorted):
-            active_map[vs.ident] = (idx == 0)
-    return active_map
+    sources = []
+    # Assume view_setups are sorted by id
+    sorted_setups = sorted(view_setups, key=lambda vs: int(vs.ident))
+    for i, vs in enumerate(sorted_setups):
+        raw = i % 6
+        adjusted = (raw - offset) % 6
+        active_flag = "true" if adjusted == 0 else "false"
+        sources.append({"active": text_elem(active_flag)})
+    return sources
 
+def build_converter_setups(view_setups, offset: int):
+    """
+    Build a list of ConverterSetup entries for each channel (view setup).
+    For each channel i (0-indexed):
+      - Let tile = i // 6 and raw = i % 6.
+      - Compute adjusted = (raw - offset) mod 6.
+      - If adjusted == 0 (active channel):
+          If tile is even, use min=100.0, max=125.0, color=GREEN_COLOR, groupId="0"
+          If tile is odd,  use min=100.0, max=150.0, color=MAGENTA_COLOR, groupId="1"
+      - Else (non-active):
+          Use min=90.0, max=130.0, color=16777215, groupId = str(adjusted)
+    Each entry’s fields are wrapped as elements.
+    """
+    converter_setups = []
+    sorted_setups = sorted(view_setups, key=lambda vs: int(vs.ident))
+    for i, vs in enumerate(sorted_setups):
+        tile = i // 6
+        raw = i % 6
+        adjusted = (raw - offset) % 6
+        if adjusted == 0:
+            # Active channel in this tile
+            if tile % 2 == 0:
+                min_val = DEFAULT_MIN_ACTIVE_EVEN
+                max_val = DEFAULT_MAX_ACTIVE_EVEN
+                color = GREEN_COLOR
+                groupId = "0"
+            else:
+                min_val = DEFAULT_MIN_ACTIVE_ODD
+                max_val = DEFAULT_MAX_ACTIVE_ODD
+                color = MAGENTA_COLOR
+                groupId = "1"
+        else:
+            # Non-active channel
+            min_val = DEFAULT_MIN_NONACTIVE
+            max_val = DEFAULT_MAX_NONACTIVE
+            color = "16777215"
+            groupId = str(adjusted)
+        entry = {
+            "id": text_elem(vs.ident),
+            "min": text_elem(min_val),
+            "max": text_elem(max_val),
+            "color": text_elem(color),
+            "groupId": text_elem(groupId)
+        }
+        converter_setups.append(entry)
+    return converter_setups
 
-def build_settings_dict(spim_data: SpimData, active_map: dict) -> dict:
+def build_source_groups(view_setups, offset: int):
     """
-    Build a dictionary that mirrors the desired settings.xml structure.
-    In this version we:
-      - Create a <Sources> list (one per view setup) with an <active> flag.
-      - Build a single active list from the view setups marked active.
-      - Group these active channels into two groups: even-indexed ones ("green") and odd-indexed ones ("magenta").
-      - For each active channel, create a ConverterSetup with fixed min/max values, assigned color, and groupId 0 or 1.
+    Build the <SourceGroups> section.
+    We group active channels (those with adjusted index 0) into two groups:
+      - "green": if tile is even
+      - "magenta": if tile is odd
+    We loop over all channels, and for each channel i (sorted by id),
+    if its adjusted index is 0, we add its id to the corresponding group.
     """
-    # Get view setups from spim_data
+    group_green = []
+    group_magenta = []
+    sorted_setups = sorted(view_setups, key=lambda vs: int(vs.ident))
+    for i, vs in enumerate(sorted_setups):
+        raw = i % 6
+        adjusted = (raw - offset) % 6
+        if adjusted == 0:
+            tile = i // 6
+            if tile % 2 == 0:
+                group_green.append(vs.ident)
+            else:
+                group_magenta.append(vs.ident)
+    groups = [
+        {
+            "active": text_elem("true"),
+            "name": text_elem("green"),
+            "id": [text_elem(id_) for id_ in group_green]
+        },
+        {
+            "active": text_elem("true"),
+            "name": text_elem("magenta"),
+            "id": [text_elem(id_) for id_ in group_magenta]
+        }
+    ]
+    return groups
+
+def build_minmax_groups():
+    """
+    Build 6 MinMaxGroup entries.
+      - Group 0 gets currentMin=0.0 and currentMax=65535.0.
+      - Groups 1 through 5 get currentMin=90.0 and currentMax=130.0.
+    Other fields are fixed.
+    """
+    groups = []
+    # Group 0:
+    groups.append({
+        "id": text_elem("0"),
+        "fullRangeMin": text_elem("-2.147483648E9"),
+        "fullRangeMax": text_elem("2.147483647E9"),
+        "rangeMin": text_elem("0.0"),
+        "rangeMax": text_elem("65535.0"),
+        "currentMin": text_elem("0.0"),
+        "currentMax": text_elem("65535.0")
+    })
+    # Groups 1 to 5:
+    for g in range(1, 6):
+        groups.append({
+            "id": text_elem(str(g)),
+            "fullRangeMin": text_elem("-2.147483648E9"),
+            "fullRangeMax": text_elem("2.147483647E9"),
+            "rangeMin": text_elem("0.0"),
+            "rangeMax": text_elem("65535.0"),
+            "currentMin": text_elem("90.0"),
+            "currentMax": text_elem("130.0")
+        })
+    return groups
+
+def build_manual_source_transforms(num=4):
+    """
+    Build exactly num SourceTransform entries.
+    We use an affine transform of "1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0".
+    Note: In the working XML there are 4 such entries.
+    """
+    transform_text = "1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0"
+    return [{"@type": "affine", "affine": text_elem(transform_text)} for _ in range(num)]
+
+def build_settings_dict(spim_data: SpimData, offset: int) -> dict:
+    """Build the full settings dictionary for output."""
     view_setups = spim_data.sequence_description.view_setups.elements
 
-    # Build the list of Sources (one per view setup)
-    sources = []
-    active_source_ids = []
-    for vs in sorted(view_setups, key=lambda vs: int(vs.ident)):
-        is_active = active_map.get(vs.ident, False)
-        sources.append({"active": "true" if is_active else "false"})
-        if is_active:
-            active_source_ids.append(vs.ident)
+    sources = build_viewer_sources(view_setups, offset)
+    converter_setups = build_converter_setups(view_setups, offset)
+    source_groups = build_source_groups(view_setups, offset)
+    minmax_groups = build_minmax_groups()
+    manual_transforms = build_manual_source_transforms(4)
 
-    # Now, group all active channels into two groups:
-    active_ids_sorted = sorted(active_source_ids, key=lambda id: int(id))
-    group0_ids = []  # even-indexed active channels => group 0 (green)
-    group1_ids = []  # odd-indexed active channels => group 1 (magenta)
-    converter_setups = []
-
-    for idx, source_id in enumerate(active_ids_sorted):
-        if idx % 2 == 0:
-            group_id = "0"
-            color = str(GREEN)
-            group0_ids.append(source_id)
-        else:
-            group_id = "1"
-            color = str(MAGENTA)
-            group1_ids.append(source_id)
-        setup = {
-            "id": source_id,
-            "min": "100.0",
-            "max": "150.0",
-            "color": color,
-            "groupId": group_id
-        }
-        converter_setups.append(setup)
-
-    # Create two SourceGroups for the active channels
-    source_groups = [
-        {"active": "true", "name": "green", "id": group0_ids},
-        {"active": "true", "name": "magenta", "id": group1_ids}
-    ]
-
-    # For simplicity we add a single default MinMaxGroup
-    minmax_groups = [{
-        "id": "0",
-        "fullRangeMin": "-2.147483648E9",
-        "fullRangeMax": "2.147483647E9",
-        "rangeMin": "0.0",
-        "rangeMax": "65535.0",
-        "currentMin": "90.0",
-        "currentMax": "150.0"
-    }]
+    # For CurrentSource we use the id of the first view setup.
+    sorted_setups = sorted(view_setups, key=lambda vs: int(vs.ident))
+    current_source = sorted_setups[0].ident if sorted_setups else ""
 
     settings = {
         "Settings": {
             "ViewerState": {
                 "Sources": {"Source": sources},
-                # Instead of grouping by tile, we now use our two active channel groups:
                 "SourceGroups": {"SourceGroup": source_groups},
-                "DisplayMode": "fs",
-                "Interpolation": "nearestneighbor",
-                "CurrentSource": active_ids_sorted[0] if active_ids_sorted else "",
-                "CurrentGroup": "0",
-                "CurrentTimePoint": "0"
+                "DisplayMode": text_elem("fs"),
+                "Interpolation": text_elem("nearestneighbor"),
+                "CurrentSource": text_elem(current_source),
+                "CurrentGroup": text_elem("0"),
+                "CurrentTimePoint": text_elem("0")
             },
             "SetupAssignments": {
                 "ConverterSetups": {"ConverterSetup": converter_setups},
                 "MinMaxGroups": {"MinMaxGroup": minmax_groups}
             },
-            "ManualSourceTransforms": {
-                # Add a default transform for each source
-                "SourceTransform": [
-                    {"@type": "affine", "affine": "1.0 0.0 0.0 0.0 0.0 1.0 0.0 0.0 0.0 0.0 1.0 0.0"}
-                    for _ in range(len(sources))
-                ]
-            },
+            "ManualSourceTransforms": {"SourceTransform": manual_transforms},
             "Bookmarks": ""
         }
     }
     return settings
+def prettify_xml(xml_string):
+    dom = parseString(xml_string)
+    return dom.toprettyxml(indent="  ")
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python formatter.py <path/to/folder/with_rounds> <optional: output/folder")
+    parser = argparse.ArgumentParser(description="Generate BDV settings.xml from BigStitcher/SpimData XML.")
+    parser.add_argument("spimdata_file", help="Path to the input SpimData XML file.")
+    parser.add_argument("-o", "--output_settings_file", default ="stitch-dataset2.settings.xml", help="Path to the output settings XML file.")
+    parser.add_argument("-c", "--channel_offset", type=int, default=0, help="Channel offset (default: 0).")
+    parser.add_argument("-g","--generate_all", action="store_true", default=False, help="Generate a settings file for each channel offset (0-5).")
+
+    args = parser.parse_args()
+
+    if args.channel_offset < 0 or args.channel_offset > 7:
+        print("channel_offset must be between 0 and 7")
         sys.exit(1)
     
-    # file = "/shared/s3/e11-hpc/compute/RP022_i1264_cpd/gel1/fov1/"
-    # spimdata_file = sys.argv[1]
-    base_folder = sys.argv[1]
-    # if len(sys.argv) == 3:
-    #     output_settings_file = sys.argv[2]
-    # else:
-    #     output_settings_file = "stitch-dataset.settings.xml"
-    def get_round_folders(base_folder: str) -> List[str]:
-        """Get a list of round folders in the base folder."""
-        return [os.path.join(base_folder, d) for d in os.listdir(base_folder) if d.startswith("round")]
-
-    # base_folder = "/shared/s3/e11-hpc/compute/RP022_i1264_cpd/gel1/fov1"
-    round_folders = get_round_folders(base_folder)
-
-    print(round_folders)
-    round_counter = 1
-
-    for round_folder in round_folders:
-        spimdata_file = os.path.join(round_folder, "stitch-dataset.xml")
-
-        if len(sys.argv) == 3:
-            output_settings_file = os.path.join(sys.argv[2], f"stitch-dataset{round_counter}.settings.xml")
-            round_counter += 1
-            print(f"Outputting to {output_settings_file}")
-        else:
-            output_settings_file = os.path.join(round_folder, "stitch-dataset.settings.xml")
-        
-        # 1. Load SpimData from XML.
-        spim_data = load_spimdata(spimdata_file)
-        
-        # 2. Choose which view setups should be active.
-        active_map = choose_active_sources(spim_data.sequence_description.view_setups.elements)
-        
-        # 3. Build the settings dictionary.
-        settings_dict = build_settings_dict(spim_data, active_map)
-        
-        # 4. Convert the dictionary to XML.
-        settings_xml = xmltodict.unparse(settings_dict, pretty=True)
-        
-        # 5. Write out the settings XML.
-        with open(output_settings_file, "w", encoding="utf-8") as f:
-            f.write(settings_xml)
-        
-        print(f"Settings XML written to {output_settings_file}")
+    if args.generate_all:
+        for offset in range(6):
+            output_file = args.output_settings_file.replace(".xml", f"_offset_{offset}.xml")
+            print(f"Generating settings for channel offset: {offset}")
+            spim_data = load_spimdata(args.spimdata_file)
+            settings_dict = build_settings_dict(spim_data, offset)
+            settings_xml = xmltodict.unparse(settings_dict)
+            pretty_xml = prettify_xml(settings_xml)
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(pretty_xml)
+            print(f"Settings XML written to {output_file}")
+    else:
+        print(f"Using channel offset: {args.channel_offset}")
+        spim_data = load_spimdata(args.spimdata_file)
+        settings_dict = build_settings_dict(spim_data, args.channel_offset)
+        settings_xml = xmltodict.unparse(settings_dict)
+        pretty_xml = prettify_xml(settings_xml)
+        with open(args.output_settings_file, "w", encoding="utf-8") as f:
+            f.write(pretty_xml)
+        print(f"Settings XML written to {args.output_settings_file}")
 
 if __name__ == "__main__":
     main()
