@@ -3,7 +3,7 @@ This script reads a BigStitcher/SpimData XML file,
 selects one active channel per tile (6 channels per tile) according to a channel offset,
 and generates a BDV settings.xml file that exactly matches the expected structure.
 
-When you copy it in and load the file, it might give you a java error — you can feel free to ignore that it doesn't really matter.
+When you copy it in and load the file, it might give you a java error — you can feel free to ignore that it doesn't really matter. Channels are starting at 0 (so 0-5, not 1-6).
 
 In the working XML:
   - In <ViewerState>/<Sources> there are 72 Source entries,
@@ -40,7 +40,7 @@ from xml.dom.minidom import parseString
 
 # Colors and calibration values (as strings)
 GREEN_COLOR = "65281"   # active channel in even tiles (green)
-MAGENTA_COLOR = "16777215"  # active channel in odd tiles (magenta)
+MAGENTA_COLOR = "16596405"  # active channel in odd tiles (magenta)
 DEFAULT_MIN_ACTIVE_EVEN = "100.0"
 DEFAULT_MAX_ACTIVE_EVEN = "125.0"
 DEFAULT_MIN_ACTIVE_ODD  = "100.0"
