@@ -107,10 +107,11 @@ def build_converter_setups(view_setups, offset: int):
                 color = MAGENTA_COLOR
                 groupId = "1"
         else:
-            # Non-active channel
+            # Non-active channel: assign color in blocks of 5
+            chunk = i // 5
+            color = GREEN_COLOR if (chunk % 2 == 0) else MAGENTA_COLOR
             min_val = DEFAULT_MIN_NONACTIVE
             max_val = DEFAULT_MAX_NONACTIVE
-            color = "16777215"
             groupId = str(adjusted)
         entry = {
             "id": text_elem(vs.ident),
@@ -271,3 +272,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#  /shared/s3/e11-hpc/compute/RP022_i1264_cpd/gel2/fov1/round2/stitcher-dataset.xml
+# python formatter.py /shared/s3/e11-hpc/compute/RP022_i1264_cpd/gel3/fov1/round8/stitch-dataset.xml -o gel3round8.xml  
